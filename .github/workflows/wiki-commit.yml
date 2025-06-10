@@ -1,0 +1,39 @@
+name: Update Wiki
+
+on:
+  push:
+    paths:
+      # wiki ディレクトリ配下のファイルが更新されたら実行
+      - 'docs/wiki/**'
+
+jobs:
+  wiki-commit:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. メインリポジトリ（owner/repo）を clone
+      - name: Checkout Main Repository
+        uses: actions/checkout@v3
+        with:
+          path: 'mcp-server-tutorial'
+
+      # 2. Wiki リポジトリをクローン（別ディレクトリにクローン）
+      - name: Checkout Wiki Repository
+        uses: actions/checkout@v3
+        with:
+          repository: 'HiroyukiMakita/mcp-server-tutorial.wiki'
+          path: wiki
+
+      # 3. docs/wiki/** の内容を Wiki リポジトリにコピー
+      - name: Copy Updated Docs to Wiki
+        run: |
+          cp -R mcp-server-tutorial/docs/wiki/* wiki/
+
+      # 4. Wiki リポジトリの変更をコミット＆プッシュ
+      - name: Commit and Push Changes to Wiki
+        run: |
+          cd wiki
+          git config --global user.email "bot@example.com"
+          git config --global user.name "bot"
+          git add -A
+          git commit -m '🤖: Update wiki by bot' || echo "No changes to commit"
+          git push origin master
