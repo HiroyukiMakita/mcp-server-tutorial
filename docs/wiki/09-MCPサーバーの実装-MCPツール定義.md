@@ -17,7 +17,8 @@ MCPツールは、MCPサーバーが外部に提供する機能の単位です�
 
 ```typescript
 // weather-server/src/index.ts
-import { McpServer, StdioServerTransport } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js"; // 変更点
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"; // 変更点
 import { z } from 'zod';
 import axios, { AxiosInstance } from 'axios'; // APIクライアントで使用
 
@@ -42,14 +43,6 @@ type GetForecastInput = z.infer<typeof GetForecastInputSchema>;
 // async function getForecast(city: string, days: number = 3): Promise<ForecastResponse | { error: string }> { ... }
 // --- ここまで ---
 
-
-// MCPサーバーのインスタンスを作成
-const server = new McpServer({
-  name: "weather-server-tutorial", // MCPサーバーの名前
-  version: "0.1.0",             // バージョン
-  description: "天気情報を提供するMCPサーバー (チュートリアル用)",
-});
-
 // APIキーのチェック (サーバー起動前に行うのが望ましい)
 const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY;
 if (!OPENWEATHER_API_KEY) {
@@ -61,20 +54,23 @@ if (!OPENWEATHER_API_KEY) {
 // let weatherApi: AxiosInstance; // ... weatherApiの初期化 (前ページ参照)
 // async function getCurrentWeather ...
 // async function getForecast ...
-// (これらの定義は server.tool のコールバック内で直接呼び出すか、このスコープでアクセス可能にする)
+
+// (ツール定義は後述。ここではサーバーインスタンス作成の準備のみ)
 ```
-*コメント*: `McpServer` のコンストラクタには、サーバー名、バージョン、説明などを指定できます。また、APIキーのチェックをサーバーインスタンス作成後、ツール定義前に行い、キーが存在しない場合はエラー終了するようにしています。
+*コメント*: APIキーのチェックをサーバーインスタンス作成前に行い、キーが存在しない場合はエラー終了するようにしています。ツール定義は、`McpServer` のコンストラクタに渡す形で行います。
 
-## 2. `get_current_weather` ツールの定義
+## 2. ツール定義オブジェクトの作成
 
-`server.tool()` メソッドを使って、現在の天気を取得するツールを定義します。
+まず、各ツールに対応する定義オブジェクトを作成します。これには、ツール名、入力スキーマ、そして実行ロジックが含まれます。
+
+### `get_current_weather` ツール定義オブジェクト
 
 ```typescript
-// get_current_weather ツールの定義
-server.tool(
-  "get_current_weather", // ツール名
-  GetCurrentWeatherInputSchema, // 入力パラメータのzodスキーマ
-  async (input: GetCurrentWeatherInput) => { // 実行されるコールバック関数
+// get_current_weather ツールの定義オブジェクト
+const getCurrentWeatherTool = {
+  name: "get_current_weather", // ツール名
+  inputSchema: GetCurrentWeatherInputSchema, // 入力パラメータのzodスキーマ
+  execute: async (input: GetCurrentWeatherInput) => { // 実行されるコールバック関数
     // input は GetCurrentWeatherInputSchema でバリデーション済みのオブジェクト
     const { city } = input;
 
@@ -92,7 +88,6 @@ server.tool(
     }
 
     // 取得成功時：レスポンスを整形して返す (ここでは簡単のためJSON文字列で返す)
-    // より丁寧には、前ページで定義した FormattedCurrentWeather のような型に整形する
     const responseText = JSON.stringify({
       city: weatherData.name,
       temperature: weatherData.main.temp,
@@ -106,25 +101,25 @@ server.tool(
       content: [{ type: "text", text: responseText }],
     };
   }
-);
+};
 ```
-*   **第一引数**: ツール名 (文字列)。クライアントはこの名前でツールを呼び出します。
-*   **第二引数**: 入力パラメータの型を定義した `zod` スキーマ。MCP SDK はこのスキーマを使ってクライアントからの入力値を自動的にバリデーションします。
-*   **第三引数**: ツールの本体となる非同期関数。引数にはバリデーション済みの入力オブジェクトが渡されます。
+*   `name`: ツール名 (文字列)。クライアントはこの名前でツールを呼び出します。
+*   `inputSchema`: 入力パラメータの型を定義した `zod` スキーマ。MCP SDK はこのスキーマを使ってクライアントからの入力値を自動的にバリデーションします。
+*   `execute`: ツールの本体となる非同期関数。引数にはバリデーション済みの入力オブジェクトが渡されます。
     *   この関数内で、APIクライアント関数 (`getCurrentWeather`) を呼び出し、結果を取得します。
     *   結果を `Content` オブジェクトの配列として返します。`type: "text"` でプレーンテキストやJSON文字列を返すのが一般的です。
     *   エラーが発生した場合は、`isError: true` を設定してエラーメッセージを返します。
 
-## 3. `get_forecast` ツールの定義
+### `get_forecast` ツール定義オブジェクト
 
-同様に、天気予報を取得するツール `get_forecast` を定義します。
+同様に、天気予報を取得するツール `get_forecast` の定義オブジェクトを作成します。
 
 ```typescript
-// get_forecast ツールの定義
-server.tool(
-  "get_forecast", // ツール名
-  GetForecastInputSchema, // 入力パラメータのzodスキーマ
-  async (input: GetForecastInput) => { // 実行されるコールバック関数
+// get_forecast ツールの定義オブジェクト
+const getForecastTool = {
+  name: "get_forecast", // ツール名
+  inputSchema: GetForecastInputSchema, // 入力パラメータのzodスキーマ
+  execute: async (input: GetForecastInput) => { // 実行されるコールバック関数
     const { city, days } = input; // days はデフォルト値が適用された状態
 
     console.log(`[Tool:get_forecast] 都市 "${city}" の ${days} 日間の天気予報を取得します...`);
@@ -143,6 +138,8 @@ server.tool(
       dateTime: item.dt_txt,
       temperature: item.main.temp,
       description: item.weather[0]?.description || "情報なし",
+      // チュートリアル本体のコードに合わせて降水確率も追加
+      precipitation_probability: item.pop !== undefined ? `${(item.pop * 100).toFixed(0)}%` : "N/A",
     }));
 
     const responseText = JSON.stringify({
@@ -154,17 +151,41 @@ server.tool(
       content: [{ type: "text", text: responseText }],
     };
   }
-);
+};
 ```
 こちらも `get_current_weather` と同様の構造です。入力スキーマ (`GetForecastInputSchema`) とAPIクライアント関数 (`getForecast`) が異なります。
 
-## 4. サーバーの起動処理
+## 3. MCPサーバーインスタンスの作成とツール登録
 
-すべてのツールを定義したら、最後にサーバーを起動するための処理を記述します。
-Stdioベースのサーバーの場合、`StdioServerTransport` を使用します。
+作成したツール定義オブジェクトを使って、`McpServer` のインスタンスを作成し、同時にツールを登録します。
 
 ```typescript
-// --- ここまでに server.tool(...) の定義が複数ある ---
+// MCPサーバーのインスタンスを作成し、ツールを登録
+const server = new McpServer(
+  { // 第一引数: サーバーの基本情報
+    name: "weather-server-tutorial",
+    version: "0.1.0",
+    description: "天気情報を提供するMCPサーバー (チュートリアル用)",
+  },
+  { // 第二引数: サーバーのケイパビリティ (ツールなど)
+    capabilities: {
+      tools: { // toolsプロパティにツール定義オブジェクトを登録
+        getCurrentWeatherTool, // get_current_weatherツール
+        getForecastTool,       // get_forecastツール
+      },
+    },
+  }
+);
+```
+*コメント*: `McpServer` のコンストラクタの第一引数にはサーバーの基本情報（名前、バージョン、説明）を渡します。第二引数にはオプションでケイパビリティを指定するオブジェクトを渡せます。このオブジェクトの `capabilities.tools` プロパティに、先ほど定義したツールオブジェクト (`getCurrentWeatherTool`, `getForecastTool`) をキーと値のペアとして設定することで、サーバーにツールが登録されます。
+
+## 4. サーバーの起動処理
+
+すべてのツールを定義・登録したら、最後にサーバーを起動するための処理を記述します。
+Stdioベースのサーバーの場合、`StdioServerTransport` を使用します。この部分は以前の方式と大きな変更はありません。
+
+```typescript
+// --- ここまでにサーバーインスタンスの作成とツール登録が完了している ---
 
 async function main() {
   // Stdio (標準入出力) を使用したトランスポートを作成
@@ -185,6 +206,33 @@ async function main() {
 main();
 ```
 これで、`src/index.ts` の主要な実装は完了です。
-実際には、型定義やAPIクライアント関数を別ファイルに分割し、`index.ts` からインポートする形にリファクタリングすると、より管理しやすくなります。
+
+## 5. ファイル構成と実際の分割例
+
+実際の実装では、以下のような構造でファイルを分割しています：
+
+```
+weather-server/
+├── src/
+│   ├── apiClient.ts    # APIクライアントの実装
+│   │                   # - OpenWeatherMap APIとの通信
+│   │                   # - レスポンスの型チェック
+│   │                   # - エラーハンドリング
+│   │
+│   ├── index.ts        # メインのMCPサーバー実装
+│   │                   # - ツール定義
+│   │                   # - サーバー設定
+│   │                   # - 起動処理
+│   │
+│   └── index.test.ts   # ユニットテスト
+                        # - APIクライアントのテスト
+                        # - モック設定
+```
+
+この分割により：
+1. 各ファイルの責務が明確
+2. コードの保守性が向上
+3. テストがしやすい構造
+4. 将来の機能追加や変更が容易
 
 次のページでは、作成したMCPサーバーをビルドし、ローカルで実行して動作確認を行う方法と、MCP設定ファイルへの登録について説明します。
