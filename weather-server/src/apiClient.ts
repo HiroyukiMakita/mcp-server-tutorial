@@ -132,7 +132,8 @@ export async function getCurrentWeather(city: string): Promise<CurrentWeatherRes
     const api = getWeatherApi();
     console.log(`[API Client] 都市 "${city}" の現在の天気を取得します...`);
     
-    const response = await api.get<any>('/weather', { params: { q: city } });
+    const encodedCity = encodeURIComponent(city);
+    const response = await api.get<any>('/weather', { params: { q: encodedCity } });
     const parseResult = CurrentWeatherResponseSchema.safeParse(response.data);
     
     if (!parseResult.success) {
@@ -152,6 +153,9 @@ export async function getCurrentWeather(city: string): Promise<CurrentWeatherRes
       const apiError = err as AxiosError;
       const apiErrorMessage = (apiError.response?.data as any)?.message || apiError.message;
       console.error(`[API Client] 現在の天気取得APIエラー (都市: ${city}): ${apiErrorMessage}`, apiError.response?.data);
+      if (apiErrorMessage === "city not found") {
+        return { error: `指定された都市 "${city}" が見つかりません。都市名が正しいか確認してください。` };
+      }
       return { error: `天気取得APIエラー: ${apiErrorMessage}` };
     }
     console.error(`[API Client] 天気取得中に予期せぬエラー (都市: ${city}):`, error);
@@ -165,7 +169,8 @@ export async function getForecast(city: string, days: number = 3): Promise<Forec
     console.log(`[API Client] 都市 "${city}" の ${days} 日間の天気予報を取得します...`);
     const forecastCount = Math.min(days, 5) * 8; // 1日8レコード (3時間ごと)
 
-    const response = await api.get<any>('/forecast', { params: { q: city, cnt: forecastCount } });
+    const encodedCity = encodeURIComponent(city);
+    const response = await api.get<any>('/forecast', { params: { q: encodedCity, cnt: forecastCount } });
     const parseResult = ForecastResponseSchema.safeParse(response.data);
     
     if (!parseResult.success) {
@@ -185,6 +190,9 @@ export async function getForecast(city: string, days: number = 3): Promise<Forec
       const apiError = err as AxiosError;
       const apiErrorMessage = (apiError.response?.data as any)?.message || apiError.message;
       console.error(`[API Client] 天気予報取得APIエラー (都市: ${city}): ${apiErrorMessage}`, apiError.response?.data);
+      if (apiErrorMessage === "city not found") {
+        return { error: `指定された都市 "${city}" が見つかりません。都市名が正しいか確認してください。` };
+      }
       return { error: `天気予報APIエラー: ${apiErrorMessage}` };
     }
     console.error(`[API Client] 天気予報取得中に予期せぬエラー (都市: ${city}):`, error);
