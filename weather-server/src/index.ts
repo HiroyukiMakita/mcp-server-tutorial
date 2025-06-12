@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -9,6 +8,7 @@ import {
   ReadResourceRequestSchema,
   CallToolRequest,
   ReadResourceRequest,
+  ResourceContents,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
@@ -52,6 +52,17 @@ const GetForecastInputSchema = z.object({
 });
 type GetForecastInput = z.infer<typeof GetForecastInputSchema>;
 
+// リソーステンプレートの定義
+const weatherResourceTemplate = {
+  name: "weather",
+  description: "都市の気象情報を提供するリソース",
+  uriTemplate: "weather://{city}/{type}",
+  parameters: {
+    city: z.string(),
+    type: z.enum(["current", "forecast"]),
+  },
+};
+
 // MCPサーバーとツールの定義
 const getCurrentWeatherTool = {
   name: "get_current_weather",
@@ -69,9 +80,9 @@ const getCurrentWeatherTool = {
       description: result.weather[0]?.description || "情報なし",
       humidity: result.main.humidity,
       windSpeed: result.wind.speed,
-      updatedAt: new Date(result.dt * 1000).toISOString()
+      updatedAt: new Date(result.dt * 1000).toISOString(),
     };
-  }
+  },
 };
 
 const getForecastTool = {
@@ -84,6 +95,7 @@ const getForecastTool = {
     if ("error" in result) {
       throw new Error(`エラー: ${result.error}`);
     }
+
     const formattedForecasts = result.list.map((item: WeatherListItem) => ({
       dateTime: item.dt_txt,
       temperature: item.main.temp,
@@ -91,24 +103,15 @@ const getForecastTool = {
       precipitation_probability:
         item.pop !== undefined ? `${(item.pop * 100).toFixed(0)}%` : "N/A",
     }));
+
     return {
       city: result.city.name,
-      forecasts: formattedForecasts
+      forecasts: formattedForecasts,
     };
-  }
+  },
 };
 
-// リソーステンプレートの定義
-const weatherResourceTemplate = {
-  name: "weather",
-  description: "都市の気象情報を提供するリソース",
-  uriTemplate: "weather://{city}/{type}",
-  parameters: {
-    city: z.string(),
-    type: z.enum(["current", "forecast"])
-  }
-};
-
+// サーバーインスタンスの作成
 const server = new McpServer(
   {
     name: "weather-server-tutorial",
@@ -136,7 +139,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
         name: "weather",
         description: "都市の気象情報を提供するリソース",
         uriTemplate: weatherResourceTemplate.uriTemplate,
-        uri: "weather://tokyo/current"
+        uri: "weather://tokyo/current",
       },
     ],
   };
@@ -153,17 +156,17 @@ server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
         parameters: {
           city: {
             type: "string",
-            description: "天気を取得したい都市名"
+            description: "天気を取得したい都市名",
           },
           type: {
             type: "string",
             description: "取得する情報の種類（current または forecast）",
-            enum: ["current", "forecast"]
-          }
+            enum: ["current", "forecast"],
+          },
         },
-        required: ["city", "type"]
-      }
-    ]
+        required: ["city", "type"],
+      },
+    ],
   };
 });
 
@@ -180,10 +183,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             city: {
               type: "string",
               description: "天気を取得したい都市名",
-              minLength: 1
-            }
+              minLength: 1,
+            },
           },
-          required: ["city"]
+          required: ["city"],
         },
       },
       {
@@ -195,17 +198,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             city: {
               type: "string",
               description: "天気予報を取得したい都市名",
-              minLength: 1
+              minLength: 1,
             },
             days: {
               type: "number",
               description: "予報日数（1～5日、デフォルト3日）",
               minimum: 1,
               maximum: 5,
-              default: 3
-            }
+              default: 3,
+            },
           },
-          required: ["city"]
+          required: ["city"],
         },
       },
     ],
@@ -232,10 +235,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
               description: result.weather[0]?.description || "情報なし",
               humidity: result.main.humidity,
               windSpeed: result.wind.speed,
-              updatedAt: new Date(result.dt * 1000).toISOString()
-            }, null, 2)
-          }
-        ]
+              updatedAt: new Date(result.dt * 1000).toISOString(),
+            }, null, 2),
+          },
+        ],
       };
     }
     case "get_forecast": {
@@ -258,10 +261,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
             type: "text",
             text: JSON.stringify({
               city: result.city.name,
-              forecasts: formattedForecasts
-            }, null, 2)
-          }
-        ]
+              forecasts: formattedForecasts,
+            }, null, 2),
+          },
+        ],
       };
     }
     default:
@@ -269,8 +272,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
   }
 });
 
+type ResourceResponse = {
+  _meta: Record<string, never>;
+  contents: ResourceContents[];
+};
+
 // リソース読み取りのハンドラーを登録
-server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResourceRequest) => {
+server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResourceRequest): Promise<ResourceResponse> => {
   try {
     // URIのバリデーション
     if (!request.params.uri.startsWith('weather://')) {
@@ -278,10 +286,11 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResource
     }
 
     // URIから都市名とタイプを抽出
-    const uri = request.params.uri.replace('weather://', '');
-    const segments = uri.split('/');
-    
+    const uri = request.params.uri.replace('weather://', '').replace(/\/+$/, '');
+    const segments = uri.split('/').filter(Boolean);
+
     if (segments.length !== 2) {
+      console.error('Invalid segments:', segments);
       throw new Error('Invalid URI format: must contain exactly two segments (city and type)');
     }
     
@@ -311,8 +320,8 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResource
               description: result.weather[0]?.description || "情報なし",
               humidity: result.main.humidity,
               windSpeed: result.wind.speed,
-              updatedAt: new Date(result.dt * 1000).toISOString()
-            }, null, 2)
+              updatedAt: new Date(result.dt * 1000).toISOString(),
+            }, null, 2),
           },
         ],
       };
@@ -336,8 +345,8 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResource
           uri: request.params.uri,
           text: JSON.stringify({
             city: result.city.name,
-            forecasts: formattedForecasts
-          }, null, 2)
+            forecasts: formattedForecasts,
+          }, null, 2),
         },
       ],
     };

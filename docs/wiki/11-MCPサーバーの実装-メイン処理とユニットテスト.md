@@ -16,8 +16,15 @@
 特に重要なのは、リソースハンドラーの実装です。URIの形式は`weather://{city}/{type}`で、以下のような処理が必要です：
 
 ```typescript
+import { ResourceContents } from "@modelcontextprotocol/sdk/types.js";
+
+type ResourceResponse = {
+  _meta: Record<string, never>;
+  contents: ResourceContents[];
+};
+
 // リソース読み取りのハンドラーを登録
-server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResourceRequest) => {
+server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResourceRequest): Promise<ResourceResponse> => {
   try {
     // URIのバリデーション
     if (!request.params.uri.startsWith('weather://')) {
@@ -25,10 +32,11 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResource
     }
 
     // URIから都市名とタイプを抽出
-    const uri = request.params.uri.replace('weather://', '');
-    const segments = uri.split('/');
-    
+    const uri = request.params.uri.replace('weather://', '').replace(/\/+$/, '');
+    const segments = uri.split('/').filter(Boolean);
+
     if (segments.length !== 2) {
+      console.error('Invalid segments:', segments);
       throw new Error('Invalid URI format: must contain exactly two segments (city and type)');
     }
     
@@ -59,8 +67,8 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResource
               description: result.weather[0]?.description || "情報なし",
               humidity: result.main.humidity,
               windSpeed: result.wind.speed,
-              updatedAt: new Date(result.dt * 1000).toISOString()
-            }, null, 2)
+              updatedAt: new Date(result.dt * 1000).toISOString(),
+            }, null, 2),
           },
         ],
       };
@@ -71,7 +79,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResource
     if ("error" in result) {
       throw new Error(`エラー: ${result.error}`);
     }
-    const formattedForecasts = result.list.map((item) => ({
+    const formattedForecasts = result.list.map((item: WeatherListItem) => ({
       dateTime: item.dt_txt,
       temperature: item.main.temp,
       description: item.weather[0]?.description || "情報なし",
@@ -85,8 +93,8 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResource
           uri: request.params.uri,
           text: JSON.stringify({
             city: result.city.name,
-            forecasts: formattedForecasts
-          }, null, 2)
+            forecasts: formattedForecasts,
+          }, null, 2),
         },
       ],
     };
@@ -112,6 +120,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResource
 - URIのパースには単純な文字列操作を使用し、URLオブジェクトは使用しません
 - スキーム(`weather://`)の後には都市名とタイプが必要です
 - タイプは`current`または`forecast`のみ有効です
+- 末尾のスラッシュは無視されます（例：`weather://tokyo/current/`は有効）
 
 ## 2. ユニットテストの導入 (Vitest の例)
 
