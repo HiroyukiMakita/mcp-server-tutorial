@@ -11,8 +11,12 @@
 
 ```typescript
 // weather-server/src/index.ts
-import { Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js"; // 変更点
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"; // 変更点
+import { Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { z } from 'zod';
 import axios, { AxiosInstance } from 'axios';
 
@@ -102,75 +106,97 @@ async function getForecast(city: string, days: number = 3): Promise<ForecastResp
 
 // --- MCPサーバーとツールの定義 ---
 
-// get_current_weather ツールの定義オブジェクト
-const getCurrentWeatherTool = {
-  name: "get_current_weather",
-  inputSchema: GetCurrentWeatherInputSchema,
-  execute: async (input: GetCurrentWeatherInput) => {
-    const { city } = input;
-    console.log(`[Tool:get_current_weather] 都市 "${city}" の現在の天気を取得リクエスト受信。`);
-    const weatherData = await getCurrentWeather(city);
-    
-    if ('error' in weatherData) {
-      console.error(`[Tool:get_current_weather] エラー: ${weatherData.error}`);
-      return { content: [{ type: "text", text: `エラー: ${weatherData.error}` }], isError: true };
-    }
-    
-    const responseText = JSON.stringify({
-      city: weatherData.name,
-      temperature: weatherData.main.temp,
-      description: weatherData.weather[0]?.description || "情報なし",
-      humidity: weatherData.main.humidity,
-      windSpeed: weatherData.wind.speed,
-      updatedAt: new Date(weatherData.dt * 1000).toISOString(),
-    }, null, 2);
-    console.log(`[Tool:get_current_weather] 都市 "${city}" の現在の天気を返却します。`);
-    return { content: [{ type: "text", text: responseText }] };
-  },
-};
-
-// get_forecast ツールの定義オブジェクト
-const getForecastTool = {
-  name: "get_forecast",
-  inputSchema: GetForecastInputSchema,
-  execute: async (input: GetForecastInput) => {
-    const { city, days } = input;
-    console.log(`[Tool:get_forecast] 都市 "${city}" の ${days} 日間の天気予報を取得リクエスト受信。`);
-    const forecastData = await getForecast(city, days);
-
-    if ('error' in forecastData) {
-      console.error(`[Tool:get_forecast] エラー: ${forecastData.error}`);
-      return { content: [{ type: "text", text: `エラー: ${forecastData.error}` }], isError: true };
-    }
-
-    const formattedForecasts = forecastData.list.map(item => ({
-      dateTime: item.dt_txt,
-      temperature: item.main.temp,
-      description: item.weather[0]?.description || "情報なし",
-      precipitation_probability: item.pop !== undefined ? `${(item.pop * 100).toFixed(0)}%` : "N/A",
-    }));
-    const responseText = JSON.stringify({ city: forecastData.city.name, forecasts: formattedForecasts }, null, 2);
-    console.log(`[Tool:get_forecast] 都市 "${city}" の ${days} 日間の天気予報を返却します。`);
-    return { content: [{ type: "text", text: responseText }] };
-  },
-};
-
-// MCPサーバーのインスタンスを作成し、ツールを登録
+// MCPサーバーのインスタンスを作成
 const server = new McpServer(
   { // 第一引数: サーバーの基本情報
     name: "weather-server-tutorial",
     version: "0.1.0",
     description: "天気情報を提供するMCPサーバー (チュートリアル用)",
   },
-  { // 第二引数: サーバーのケイパビリティ (ツールなど)
+  { // 第二引数: サーバーのケイパビリティ
     capabilities: {
-      tools: { // toolsプロパティにツール定義オブジェクトを登録
-        getCurrentWeatherTool,
-        getForecastTool,
-      },
+      tools: {}, // ツールはハンドラーで定義するため、空オブジェクトを指定
     },
   }
 );
+
+// ツール一覧を返すハンドラーを登録
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: [
+      {
+        name: "get_current_weather",
+        description: "指定した都市の現在の天気を取得します",
+        inputSchema: GetCurrentWeatherInputSchema,
+      },
+      {
+        name: "get_forecast",
+        description: "指定した都市の天気予報を取得します",
+        inputSchema: GetForecastInputSchema,
+      },
+    ],
+  };
+});
+
+// ツール実行を処理するハンドラーを登録
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  switch (request.params.name) {
+    case "get_current_weather": {
+      const input = request.params.arguments as GetCurrentWeatherInput;
+      console.log(`[Tool:get_current_weather] 都市 "${input.city}" の現在の天気を取得リクエスト受信。`);
+      
+      const weatherData = await getCurrentWeather(input.city);
+      if ("error" in weatherData) {
+        throw new Error(`エラー: ${weatherData.error}`);
+      }
+
+      const responseText = JSON.stringify({
+        city: weatherData.name,
+        temperature: weatherData.main.temp,
+        description: weatherData.weather[0]?.description || "情報なし",
+        humidity: weatherData.main.humidity,
+        windSpeed: weatherData.wind.speed,
+        updatedAt: new Date(weatherData.dt * 1000).toISOString()
+      }, null, 2);
+
+      console.log(`[Tool:get_current_weather] 都市 "${input.city}" の現在の天気を返却します。`);
+      return {
+        content: [{ type: "text", text: responseText }]
+      };
+    }
+
+    case "get_forecast": {
+      const input = request.params.arguments as GetForecastInput;
+      console.log(`[Tool:get_forecast] 都市 "${input.city}" の ${input.days} 日間の天気予報を取得リクエスト受信。`);
+
+      const forecastData = await getForecast(input.city, input.days);
+      if ("error" in forecastData) {
+        throw new Error(`エラー: ${forecastData.error}`);
+      }
+
+      const formattedForecasts = forecastData.list.map((item) => ({
+        dateTime: item.dt_txt,
+        temperature: item.main.temp,
+        description: item.weather[0]?.description || "情報なし",
+        precipitation_probability:
+          item.pop !== undefined ? `${(item.pop * 100).toFixed(0)}%` : "N/A",
+      }));
+
+      const responseText = JSON.stringify({
+        city: forecastData.city.name,
+        forecasts: formattedForecasts
+      }, null, 2);
+
+      console.log(`[Tool:get_forecast] 都市 "${input.city}" の ${input.days} 日間の天気予報を返却します。`);
+      return {
+        content: [{ type: "text", text: responseText }]
+      };
+    }
+
+    default:
+      throw new Error("Unknown tool name");
+  }
+});
 // --- MCPサーバーとツールの定義ここまで ---
 
 
@@ -247,20 +273,44 @@ vi.mock('axios', () => ({
   },
 }));
 
-describe('API Client Functions', () => {
+describe('MCP Server Functions', () => {
   const mockCity = "Tokyo";
   const mockAxiosCreate = axios.create as unknown as ReturnType<typeof vi.fn>;
   let mockAxiosGet: ReturnType<typeof vi.fn>;
+  let mockServer: McpServer;
 
   beforeEach(() => {
     // 各テストの前にモックをリセット
     vi.clearAllMocks();
     mockAxiosGet = vi.fn();
     mockAxiosCreate.mockReturnValue({ get: mockAxiosGet });
+    
+    // MCPサーバーのインスタンスを作成
+    mockServer = new McpServer(
+      {
+        name: "weather-server-tutorial-test",
+        version: "0.1.0",
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      }
+    );
   });
 
-  describe('getCurrentWeather', () => {
-    it('指定した都市の現在の天気を正しく取得し、整形されたデータを返すこと', async () => {
+  describe('Tool Handlers', () => {
+    it('ListToolsRequestSchemaハンドラーが正しいツール一覧を返すこと', async () => {
+      const toolsResponse = await mockServer.handleRequest({
+        method: "list_tools",
+      });
+
+      expect(toolsResponse.tools).toHaveLength(2);
+      expect(toolsResponse.tools[0].name).toBe("get_current_weather");
+      expect(toolsResponse.tools[1].name).toBe("get_forecast");
+    });
+
+    it('CallToolRequestSchemaハンドラーがget_current_weatherを正しく実行すること', async () => {
       const mockApiResponseData = {
         weather: [{ description: "晴れ", id: 800, main: "Clear", icon: "01d" }],
         main: { temp: 25, humidity: 60 },
@@ -271,12 +321,21 @@ describe('API Client Functions', () => {
 
       mockAxiosGet.mockResolvedValueOnce({ data: mockApiResponseData });
 
-      const result = await getCurrentWeather(mockCity);
+      const result = await mockServer.handleRequest({
+        method: "call_tool",
+        params: {
+          name: "get_current_weather",
+          arguments: { city: mockCity }
+        }
+      });
 
-      expect(mockAxiosCreate).toHaveBeenCalled();
-      expect(mockAxiosGet).toHaveBeenCalledWith('/weather', { params: { q: mockCity } });
-      expect(result).toEqual(mockApiResponseData);
-      expect(result).not.toHaveProperty('error');
+      expect(result.content).toBeDefined();
+      expect(result.content[0].type).toBe("text");
+      expect(JSON.parse(result.content[0].text)).toMatchObject({
+        city: mockCity,
+        temperature: 25,
+        description: "晴れ",
+      });
     });
 
     it('API呼び出しでエラーが発生した場合、エラーオブジェクトを返すこと', async () => {

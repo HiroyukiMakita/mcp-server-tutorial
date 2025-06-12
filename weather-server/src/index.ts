@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 // apiClient.ts から型と関数をインポート
 import {
@@ -39,49 +42,37 @@ type GetForecastInput = z.infer<typeof GetForecastInputSchema>;
 // getCurrentWeather および getForecast 関数も apiClient.ts からインポート
 
 // --- MCPサーバーとツールの定義 ---
-// コメント: get_current_weatherツールの定義
+// MCPツールの定義
 const getCurrentWeatherTool = {
   name: "get_current_weather",
-  inputSchema: GetCurrentWeatherInputSchema,
-  execute: async (input: GetCurrentWeatherInput) => {
-    // ...既存のロジックをここに移動...
+  description: "指定した都市の現在の天気を取得します",
+  parameters: GetCurrentWeatherInputSchema,
+  async execute(input: GetCurrentWeatherInput) {
     const { city } = input;
     const weatherData = await getCurrentWeather(city);
     if ("error" in weatherData) {
-      return {
-        content: [{ type: "text", text: `エラー: ${weatherData.error}` }],
-        isError: true,
-      };
+      throw new Error(`エラー: ${weatherData.error}`);
     }
-    const responseText = JSON.stringify(
-      {
-        city: weatherData.name,
-        temperature: weatherData.main.temp,
-        description: weatherData.weather[0]?.description || "情報なし",
-        humidity: weatherData.main.humidity,
-        windSpeed: weatherData.wind.speed,
-        updatedAt: new Date(weatherData.dt * 1000).toISOString(),
-      },
-      null,
-      2
-    );
-    return { content: [{ type: "text", text: responseText }] };
-  },
+    return {
+      city: weatherData.name,
+      temperature: weatherData.main.temp,
+      description: weatherData.weather[0]?.description || "情報なし",
+      humidity: weatherData.main.humidity,
+      windSpeed: weatherData.wind.speed,
+      updatedAt: new Date(weatherData.dt * 1000).toISOString()
+    };
+  }
 };
 
-// コメント: get_forecastツールの定義
 const getForecastTool = {
   name: "get_forecast",
-  inputSchema: GetForecastInputSchema,
-  execute: async (input: GetForecastInput) => {
-    // ...既存のロジックをここに移動...
+  description: "指定した都市の天気予報を取得します",
+  parameters: GetForecastInputSchema,
+  async execute(input: GetForecastInput) {
     const { city, days } = input;
     const forecastData = await getForecast(city, days);
     if ("error" in forecastData) {
-      return {
-        content: [{ type: "text", text: `エラー: ${forecastData.error}` }],
-        isError: true,
-      };
+      throw new Error(`エラー: ${forecastData.error}`);
     }
     const formattedForecasts = forecastData.list.map((item) => ({
       dateTime: item.dt_txt,
@@ -90,16 +81,13 @@ const getForecastTool = {
       precipitation_probability:
         item.pop !== undefined ? `${(item.pop * 100).toFixed(0)}%` : "N/A",
     }));
-    const responseText = JSON.stringify(
-      { city: forecastData.city.name, forecasts: formattedForecasts },
-      null,
-      2
-    );
-    return { content: [{ type: "text", text: responseText }] };
-  },
+    return {
+      city: forecastData.city.name,
+      forecasts: formattedForecasts
+    };
+  }
 };
 
-// コメント: サーバー作成時にtools配列でツールを登録
 const server = new McpServer(
   {
     name: "weather-server-tutorial",
@@ -108,21 +96,90 @@ const server = new McpServer(
   },
   {
     capabilities: {
-      tools: { getCurrentWeatherTool, getForecastTool },
+      tools: {},
     },
   }
 );
 
-// --- MCPサーバーとツールの定義ここまで ---
+// ツール一覧を返すハンドラーを登録
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: [
+      {
+        name: "get_current_weather",
+        description: "指定した都市の現在の天気を取得します",
+        inputSchema: GetCurrentWeatherInputSchema,
+      },
+      {
+        name: "get_forecast",
+        description: "指定した都市の天気予報を取得します",
+        inputSchema: GetForecastInputSchema,
+      },
+    ],
+  };
+});
 
-// --- サーバー起動処理 ---
+// ツール実行のハンドラーを登録
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  switch (request.params.name) {
+    case "get_current_weather": {
+      const input = request.params.arguments as GetCurrentWeatherInput;
+      const weatherData = await getCurrentWeather(input.city);
+      if ("error" in weatherData) {
+        throw new Error(`エラー: ${weatherData.error}`);
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              city: weatherData.name,
+              temperature: weatherData.main.temp,
+              description: weatherData.weather[0]?.description || "情報なし",
+              humidity: weatherData.main.humidity,
+              windSpeed: weatherData.wind.speed,
+              updatedAt: new Date(weatherData.dt * 1000).toISOString()
+            }, null, 2)
+          }
+        ]
+      };
+    }
+    case "get_forecast": {
+      const input = request.params.arguments as GetForecastInput;
+      const forecastData = await getForecast(input.city, input.days);
+      if ("error" in forecastData) {
+        throw new Error(`エラー: ${forecastData.error}`);
+      }
+      const formattedForecasts = forecastData.list.map((item) => ({
+        dateTime: item.dt_txt,
+        temperature: item.main.temp,
+        description: item.weather[0]?.description || "情報なし",
+        precipitation_probability:
+          item.pop !== undefined ? `${(item.pop * 100).toFixed(0)}%` : "N/A",
+      }));
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              city: forecastData.city.name,
+              forecasts: formattedForecasts
+            }, null, 2)
+          }
+        ]
+      };
+    }
+    default:
+      throw new Error("Unknown tool name");
+  }
+});
+
+// サーバー起動処理
 async function main() {
   const transport = new StdioServerTransport();
   try {
     await server.connect(transport);
-    console.log(
-      "Weather MCP Server is running. Available tools: get_current_weather, get_forecast"
-    );
+    // プロトコルメッセージと混ざらないように、サーバー起動メッセージは出力しない
   } catch (error) {
     console.error("MCP Server failed to connect:", error);
     process.exit(1);

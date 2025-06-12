@@ -59,49 +59,101 @@ if (!OPENWEATHER_API_KEY) {
 ```
 *コメント*: APIキーのチェックをサーバーインスタンス作成前に行い、キーが存在しない場合はエラー終了するようにしています。ツール定義は、`McpServer` のコンストラクタに渡す形で行います。
 
-## 2. ツール定義オブジェクトの作成
+## 2. ツール定義とハンドラーの作成
 
-まず、各ツールに対応する定義オブジェクトを作成します。これには、ツール名、入力スキーマ、そして実行ロジックが含まれます。
+MCPサーバーでは、2つの重要なハンドラーを実装する必要があります：
 
-### `get_current_weather` ツール定義オブジェクト
+1. `ListToolsRequestSchema`: 利用可能なツールの一覧を返す
+2. `CallToolRequestSchema`: 実際のツール実行を処理する
+
+これらのハンドラーを使って、ツールの定義と実行ロジックを実装していきます。
+
+### ツール一覧を返すハンドラーの実装
 
 ```typescript
-// get_current_weather ツールの定義オブジェクト
-const getCurrentWeatherTool = {
-  name: "get_current_weather", // ツール名
-  inputSchema: GetCurrentWeatherInputSchema, // 入力パラメータのzodスキーマ
-  execute: async (input: GetCurrentWeatherInput) => { // 実行されるコールバック関数
-    // input は GetCurrentWeatherInputSchema でバリデーション済みのオブジェクト
-    const { city } = input;
+// 利用可能なツールの一覧を返すハンドラー
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: [
+      {
+        name: "get_current_weather",
+        description: "指定した都市の現在の天気を取得します",
+        inputSchema: GetCurrentWeatherInputSchema,
+      },
+      {
+        name: "get_forecast",
+        description: "指定した都市の天気予報を取得します",
+        inputSchema: GetForecastInputSchema,
+      },
+    ],
+  };
+});
+```
 
-    console.log(`[Tool:get_current_weather] 都市 "${city}" の現在の天気を取得します...`);
+### ツール実行のハンドラーの実装
 
-    // 前のページで作成したAPIクライアント関数を呼び出す
-    const weatherData = await getCurrentWeather(city); // getCurrentWeatherは上で定義/インポートされていると仮定
+```typescript
+// ツール実行を処理するハンドラー
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  switch (request.params.name) {
+    case "get_current_weather": {
+      const input = request.params.arguments as GetCurrentWeatherInput;
+      const weatherData = await getCurrentWeather(input.city);
+      
+      if ("error" in weatherData) {
+        throw new Error(`エラー: ${weatherData.error}`);
+      }
 
-    if ('error' in weatherData) {
-      // APIクライアント関数内でエラーが発生した場合
       return {
-        content: [{ type: "text", text: `エラー: ${weatherData.error}` }],
-        isError: true, // エラーであることを示すフラグ
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              city: weatherData.name,
+              temperature: weatherData.main.temp,
+              description: weatherData.weather[0]?.description || "情報なし",
+              humidity: weatherData.main.humidity,
+              windSpeed: weatherData.wind.speed,
+              updatedAt: new Date(weatherData.dt * 1000).toISOString()
+            }, null, 2)
+          }
+        ]
       };
     }
 
-    // 取得成功時：レスポンスを整形して返す (ここでは簡単のためJSON文字列で返す)
-    const responseText = JSON.stringify({
-      city: weatherData.name,
-      temperature: weatherData.main.temp,
-      description: weatherData.weather[0]?.description || "情報なし",
-      humidity: weatherData.main.humidity,
-      windSpeed: weatherData.wind.speed,
-      updatedAt: new Date(weatherData.dt * 1000).toISOString(),
-    }, null, 2);
+    case "get_forecast": {
+      const input = request.params.arguments as GetForecastInput;
+      const forecastData = await getForecast(input.city, input.days);
 
-    return {
-      content: [{ type: "text", text: responseText }],
-    };
+      if ("error" in forecastData) {
+        throw new Error(`エラー: ${forecastData.error}`);
+      }
+
+      const formattedForecasts = forecastData.list.map((item) => ({
+        dateTime: item.dt_txt,
+        temperature: item.main.temp,
+        description: item.weather[0]?.description || "情報なし",
+        precipitation_probability:
+          item.pop !== undefined ? `${(item.pop * 100).toFixed(0)}%` : "N/A",
+      }));
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              city: forecastData.city.name,
+              forecasts: formattedForecasts
+            }, null, 2)
+          }
+        ]
+      };
+    }
+
+    default:
+      throw new Error("Unknown tool name");
   }
-};
+});
 ```
 *   `name`: ツール名 (文字列)。クライアントはこの名前でツールを呼び出します。
 *   `inputSchema`: 入力パラメータの型を定義した `zod` スキーマ。MCP SDK はこのスキーマを使ってクライアントからの入力値を自動的にバリデーションします。
@@ -110,69 +162,28 @@ const getCurrentWeatherTool = {
     *   結果を `Content` オブジェクトの配列として返します。`type: "text"` でプレーンテキストやJSON文字列を返すのが一般的です。
     *   エラーが発生した場合は、`isError: true` を設定してエラーメッセージを返します。
 
-### `get_forecast` ツール定義オブジェクト
-
-同様に、天気予報を取得するツール `get_forecast` の定義オブジェクトを作成します。
-
-```typescript
-// get_forecast ツールの定義オブジェクト
-const getForecastTool = {
-  name: "get_forecast", // ツール名
-  inputSchema: GetForecastInputSchema, // 入力パラメータのzodスキーマ
-  execute: async (input: GetForecastInput) => { // 実行されるコールバック関数
-    const { city, days } = input; // days はデフォルト値が適用された状態
-
-    console.log(`[Tool:get_forecast] 都市 "${city}" の ${days} 日間の天気予報を取得します...`);
-
-    const forecastData = await getForecast(city, days); // getForecastは上で定義/インポートされていると仮定
-
-    if ('error' in forecastData) {
-      return {
-        content: [{ type: "text", text: `エラー: ${forecastData.error}` }],
-        isError: true,
-      };
-    }
-
-    // 取得成功時：レスポンスを整形して返す (ここでは主要情報のみを抽出)
-    const formattedForecasts = forecastData.list.map(item => ({
-      dateTime: item.dt_txt,
-      temperature: item.main.temp,
-      description: item.weather[0]?.description || "情報なし",
-      // チュートリアル本体のコードに合わせて降水確率も追加
-      precipitation_probability: item.pop !== undefined ? `${(item.pop * 100).toFixed(0)}%` : "N/A",
-    }));
-
-    const responseText = JSON.stringify({
-      city: forecastData.city.name,
-      forecasts: formattedForecasts,
-    }, null, 2);
-
-    return {
-      content: [{ type: "text", text: responseText }],
-    };
-  }
-};
-```
+*ポイント*:
+- `ListToolsRequestSchema` ハンドラーでは、利用可能なツールの一覧とその入力スキーマを定義します。
+- `CallToolRequestSchema` ハンドラーでは、実際のツール実行ロジックを実装します。
+- レスポンスは必ず `content` 配列の形式で返す必要があります。
+- エラーは例外をスローすることで表現します。
 こちらも `get_current_weather` と同様の構造です。入力スキーマ (`GetForecastInputSchema`) とAPIクライアント関数 (`getForecast`) が異なります。
 
-## 3. MCPサーバーインスタンスの作成とツール登録
+## 3. MCPサーバーインスタンスの作成
 
-作成したツール定義オブジェクトを使って、`McpServer` のインスタンスを作成し、同時にツールを登録します。
+MCPサーバーインスタンスを作成し、基本的なケイパビリティを設定します。
 
 ```typescript
-// MCPサーバーのインスタンスを作成し、ツールを登録
+// MCPサーバーのインスタンスを作成
 const server = new McpServer(
   { // 第一引数: サーバーの基本情報
     name: "weather-server-tutorial",
     version: "0.1.0",
     description: "天気情報を提供するMCPサーバー (チュートリアル用)",
   },
-  { // 第二引数: サーバーのケイパビリティ (ツールなど)
+  { // 第二引数: サーバーのケイパビリティ
     capabilities: {
-      tools: { // toolsプロパティにツール定義オブジェクトを登録
-        getCurrentWeatherTool, // get_current_weatherツール
-        getForecastTool,       // get_forecastツール
-      },
+      tools: {}, // ツールはハンドラーで定義するため、空オブジェクトを指定
     },
   }
 );
