@@ -254,7 +254,7 @@ server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
       {
         name: "weather",
         description: "都市の気象情報を提供するリソース",
-        template: "weather://{city}/{type}",
+        uriTemplate: "weather://{city}/{type}",
         parameters: {
           city: {
             type: "string",
