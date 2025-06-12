@@ -277,6 +277,14 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResource
   const uri = new URL(request.params.uri);
   const [city, type] = uri.pathname.split('/').slice(1);
 
+  if (!city || !type) {
+    throw new Error("Invalid URI format: city and type are required");
+  }
+
+  if (!["current", "forecast"].includes(type)) {
+    throw new Error(`Invalid resource type: ${type}. Must be either 'current' or 'forecast'`);
+  }
+
   if (type === "current") {
     const weatherData = await getCurrentWeather(city);
     if ("error" in weatherData) {

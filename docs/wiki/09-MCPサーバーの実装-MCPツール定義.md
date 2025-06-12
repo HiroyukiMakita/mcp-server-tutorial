@@ -101,4 +101,27 @@ server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
 - リソース一覧ではサンプルURIを提供して、クライアントが使い方を理解しやすくします
 - テンプレート一覧では各パラメータの詳細な説明とバリデーションルールを提供します
 
-[残りの部分は同じなので省略...]
+### リソース読み取りのハンドラーの実装
+
+```typescript
+// リソース読み取りのハンドラー
+server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResourceRequest) => {
+  const uri = new URL(request.params.uri);
+  const [city, type] = uri.pathname.split('/').slice(1);
+
+  if (!city || !type) {
+    throw new Error("Invalid URI format: city and type are required");
+  }
+
+  if (!["current", "forecast"].includes(type)) {
+    throw new Error(`Invalid resource type: ${type}. Must be either 'current' or 'forecast'`);
+  }
+
+  // 以降は各typeに応じた処理...
+});
+```
+
+*ポイント*:
+- URIのパスから必要なパラメータを抽出し、適切にバリデーション
+- パラメータの有無と値の妥当性を確認
+- エラーメッセージは具体的に、原因と期待される値を含める
