@@ -16,15 +16,19 @@
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "dev": "nodemon --quiet --watch 'src/**/*.ts' --exec 'ts-node-esm' src/index.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.6.0",
     "axios": "^1.9.0",
+    "dotenv": "^16.5.0",
     "zod": "^3.25.57"
   },
   "devDependencies": {
     "@types/node": "^20.11.24",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
     "typescript": "^5.3.3",
     "vitest": "^3.2.3"
   }

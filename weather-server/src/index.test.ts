@@ -40,20 +40,22 @@ import { getCurrentWeather, getForecast, initializeWeatherApi } from './apiClien
 describe('API Client Functions', () => {
   let mockAxiosGet: Mock;
   let mockAxiosCreate: Mock;
+  const originalEnv = process.env;
 
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    
-    // API キーを設定
+    process.env = { ...originalEnv };
     process.env.OPENWEATHER_API_KEY = 'test-api-key';
     
-    // API クライアントを初期化（これにより axios.create が呼ばれる）
-    initializeWeatherApi('test-api-key');
-    
-    // モックを取得して型付け
     mockAxiosCreate = vi.mocked(axios.create);
     mockAxiosGet = vi.mocked(mockAxiosCreate().get);
+    
+    initializeWeatherApi();
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
   });
 
   describe('getCurrentWeather', () => {
@@ -116,6 +118,26 @@ describe('API Client Functions', () => {
     });
   });
 
+  describe('initializeWeatherApi', () => {
+    it('APIキーが設定されていない場合にエラーをスローすること', () => {
+      delete process.env.OPENWEATHER_API_KEY;
+      expect(() => initializeWeatherApi()).toThrow('APIキーが必要です');
+    });
+
+    it('.envまたは引数でAPIキーが設定されている場合に正しく初期化されること', () => {
+      const api = initializeWeatherApi('custom-api-key');
+      expect(mockAxiosCreate).toHaveBeenCalledWith({
+        baseURL: 'https://api.openweathermap.org/data/2.5',
+        params: {
+          appid: 'custom-api-key',
+          units: 'metric',
+          lang: 'ja'
+        },
+        timeout: 10000
+      });
+    });
+  });
+
   describe('getForecast', () => {
     it('指定した都市と日数の天気予報を正しく取得し、整形されたデータを返すこと', async () => {
       const mockCity = 'Osaka';
@@ -166,7 +188,7 @@ describe('API Client Functions', () => {
       expect(result).not.toHaveProperty('error');
     });
 
-    it('API呼び出しでエラーが発生した場合（予報）、エラーオブジェクトを返すこと', async () => {
+    it('API呼び出しでエラーが発生した場合、エラーメッセージを返すこと', async () => {
         const mockCity = 'ForecastUnknownCity';
         const errorResponseData = { message: 'city not found for forecast' };
         const apiError = {
@@ -187,6 +209,41 @@ describe('API Client Functions', () => {
         expect(mockAxiosCreate).toHaveBeenCalled();
         expect(mockAxiosGet).toHaveBeenCalledWith('/forecast', { params: { q: mockCity, cnt: 3 * 8 } });
         expect(result).toEqual({ error: '天気予報APIエラー: city not found for forecast' });
+    });
+
+    it('APIキーが設定されていない場合、適切なエラーメッセージを返すこと', async () => {
+      delete process.env.OPENWEATHER_API_KEY;
+      const result = await getForecast('Tokyo', 3);
+      expect(result).toEqual({ error: '.envファイルにOPENWEATHER_API_KEYを設定してください。' });
+    });
+
+    it('APIレスポンスのパースに失敗した場合、エラーメッセージを返すこと', async () => {
+      const mockCity = 'ParseErrorCity';
+      const malformedApiResponseData = {
+        cod: "200",
+        message: 0,
+        cnt: 8,
+        list: [{
+          dt: 1678886400,
+          main: {
+            temp: "20", // 数値ではなく文字列（不正な形式）
+            pressure: 1013,
+            humidity: 65
+          },
+          weather: [{ id: 801, main: "Clouds", description: "薄い雲", icon: "02d" }],
+          wind: { speed: 3, deg: 120 }
+        }],
+        city: {
+          name: mockCity,
+          country: "JP",
+          coord: { lat: 34.6851, lon: 135.5044 }
+        }
+      };
+      mockAxiosGet.mockResolvedValue({ data: malformedApiResponseData } as AxiosResponse);
+
+      const result = await getForecast(mockCity, 1);
+      expect(result).toHaveProperty('error');
+      expect((result as { error: string }).error).toMatch(/APIレスポンス\(天気予報\)の形式が不正です/);
     });
   });
 });
