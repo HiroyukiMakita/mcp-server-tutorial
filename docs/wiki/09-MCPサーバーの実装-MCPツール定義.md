@@ -80,12 +80,39 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "get_current_weather",
         description: "指定した都市の現在の天気を取得します",
-        inputSchema: GetCurrentWeatherInputSchema,
+        inputSchema: {
+          type: "object",
+          properties: {
+            city: {
+              type: "string",
+              description: "天気を取得したい都市名",
+              minLength: 1
+            }
+          },
+          required: ["city"]
+        },
       },
       {
         name: "get_forecast",
         description: "指定した都市の天気予報を取得します",
-        inputSchema: GetForecastInputSchema,
+        inputSchema: {
+          type: "object",
+          properties: {
+            city: {
+              type: "string",
+              description: "天気予報を取得したい都市名",
+              minLength: 1
+            },
+            days: {
+              type: "number",
+              description: "予報日数（1～5日、デフォルト3日）",
+              minimum: 1,
+              maximum: 5,
+              default: 3
+            }
+          },
+          required: ["city"]
+        },
       },
     ],
   };
@@ -185,7 +212,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
        {
          name: string;         // ツールの識別子
          description: string;  // ツールの説明
-         inputSchema: z.ZodType; // 入力パラメータの型定義
+         inputSchema: {        // JSON Schema形式の入力パラメータ定義
+           type: "object";
+           properties: {
+             [key: string]: {
+               type: string;
+               description?: string;
+               [key: string]: any;  // その他のJSON Schemaプロパティ
+             }
+           };
+           required?: string[];
+         }
        },
        // ... 他のツール ...
      ]
