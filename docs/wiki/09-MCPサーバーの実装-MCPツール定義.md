@@ -49,7 +49,7 @@ MCPサーバーでは、以下の重要なハンドラーを実装する必要�
 ```typescript
 // リソーステンプレートの定義
 const weatherResourceTemplate = {
-  template: "weather://{city}/{type}",
+  uriTemplate: "weather://{city}/{type}",
   parameters: {
     city: z.string(),
     type: z.enum(["current", "forecast"])

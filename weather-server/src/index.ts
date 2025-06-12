@@ -107,7 +107,7 @@ const getForecastTool = {
 
 // リソーステンプレートの定義
 const weatherResourceTemplate = {
-  template: "weather://{city}/{type}",
+  uriTemplate: "weather://{city}/{type}",
   parameters: {
     city: z.string(),
     type: z.enum(["current", "forecast"])
