@@ -240,7 +240,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
       {
         name: "weather",
         description: "都市の気象情報を提供するリソース",
-        template: weatherResourceTemplate,
+        uriTemplate: weatherResourceTemplate.uriTemplate,
         uri: "weather://tokyo/current" // サンプルURIを提供
       },
     ],
