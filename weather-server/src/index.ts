@@ -9,14 +9,11 @@ import {
   ReadResourceRequestSchema,
   CallToolRequest,
   ReadResourceRequest,
-  ResourceTemplate
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
   getCurrentWeather,
   getForecast,
-  type CurrentWeatherResponse,
-  type ForecastResponse,
 } from "./apiClient.js";
 
 // APIレスポンスの型定義
@@ -31,7 +28,7 @@ type WeatherListItem = {
   pop?: number;
 };
 
-// MCPツールの入力スキーマ (これはサーバー側で必要なので残す)
+// MCPツールの入力スキーマ
 const GetCurrentWeatherInputSchema = z.object({
   city: z
     .string()
@@ -55,28 +52,24 @@ const GetForecastInputSchema = z.object({
 });
 type GetForecastInput = z.infer<typeof GetForecastInputSchema>;
 
-// APIキーチェックやaxiosインスタンス生成は apiClient.ts に移管済み
-// getCurrentWeather および getForecast 関数も apiClient.ts からインポート
-
-// --- MCPサーバーとツールの定義 ---
-// MCPツールの定義
+// MCPサーバーとツールの定義
 const getCurrentWeatherTool = {
   name: "get_current_weather",
   description: "指定した都市の現在の天気を取得します",
   parameters: GetCurrentWeatherInputSchema,
   async execute(input: GetCurrentWeatherInput) {
     const { city } = input;
-    const weatherData = await getCurrentWeather(city);
-    if ("error" in weatherData) {
-      throw new Error(`エラー: ${weatherData.error}`);
+    const result = await getCurrentWeather(city);
+    if ("error" in result) {
+      throw new Error(`エラー: ${result.error}`);
     }
     return {
-      city: weatherData.name,
-      temperature: weatherData.main.temp,
-      description: weatherData.weather[0]?.description || "情報なし",
-      humidity: weatherData.main.humidity,
-      windSpeed: weatherData.wind.speed,
-      updatedAt: new Date(weatherData.dt * 1000).toISOString()
+      city: result.name,
+      temperature: result.main.temp,
+      description: result.weather[0]?.description || "情報なし",
+      humidity: result.main.humidity,
+      windSpeed: result.wind.speed,
+      updatedAt: new Date(result.dt * 1000).toISOString()
     };
   }
 };
@@ -87,11 +80,11 @@ const getForecastTool = {
   parameters: GetForecastInputSchema,
   async execute(input: GetForecastInput) {
     const { city, days } = input;
-    const forecastData = await getForecast(city, days);
-    if ("error" in forecastData) {
-      throw new Error(`エラー: ${forecastData.error}`);
+    const result = await getForecast(city, days);
+    if ("error" in result) {
+      throw new Error(`エラー: ${result.error}`);
     }
-    const formattedForecasts = forecastData.list.map((item: WeatherListItem) => ({
+    const formattedForecasts = result.list.map((item: WeatherListItem) => ({
       dateTime: item.dt_txt,
       temperature: item.main.temp,
       description: item.weather[0]?.description || "情報なし",
@@ -99,7 +92,7 @@ const getForecastTool = {
         item.pop !== undefined ? `${(item.pop * 100).toFixed(0)}%` : "N/A",
     }));
     return {
-      city: forecastData.city.name,
+      city: result.city.name,
       forecasts: formattedForecasts
     };
   }
@@ -107,6 +100,8 @@ const getForecastTool = {
 
 // リソーステンプレートの定義
 const weatherResourceTemplate = {
+  name: "weather",
+  description: "都市の気象情報を提供するリソース",
   uriTemplate: "weather://{city}/{type}",
   parameters: {
     city: z.string(),
@@ -132,6 +127,45 @@ const server = new McpServer(
     },
   }
 );
+
+// リソース一覧を返すハンドラーを登録
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  return {
+    resources: [
+      {
+        name: "weather",
+        description: "都市の気象情報を提供するリソース",
+        uriTemplate: weatherResourceTemplate.uriTemplate,
+        uri: "weather://tokyo/current"
+      },
+    ],
+  };
+});
+
+// リソーステンプレート一覧を返すハンドラーを登録
+server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+  return {
+    resourceTemplates: [
+      {
+        name: "weather",
+        description: "都市の気象情報を提供するリソース",
+        uriTemplate: "weather://{city}/{type}",
+        parameters: {
+          city: {
+            type: "string",
+            description: "天気を取得したい都市名"
+          },
+          type: {
+            type: "string",
+            description: "取得する情報の種類（current または forecast）",
+            enum: ["current", "forecast"]
+          }
+        },
+        required: ["city", "type"]
+      }
+    ]
+  };
+});
 
 // ツール一覧を返すハンドラーを登録
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -183,21 +217,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
   switch (request.params.name) {
     case "get_current_weather": {
       const input = request.params.arguments as GetCurrentWeatherInput;
-      const weatherData = await getCurrentWeather(input.city);
-      if ("error" in weatherData) {
-        throw new Error(`エラー: ${weatherData.error}`);
+      const result = await getCurrentWeather(input.city);
+      if ("error" in result) {
+        throw new Error(`エラー: ${result.error}`);
       }
       return {
+        _meta: {},
         content: [
           {
             type: "text",
             text: JSON.stringify({
-              city: weatherData.name,
-              temperature: weatherData.main.temp,
-              description: weatherData.weather[0]?.description || "情報なし",
-              humidity: weatherData.main.humidity,
-              windSpeed: weatherData.wind.speed,
-              updatedAt: new Date(weatherData.dt * 1000).toISOString()
+              city: result.name,
+              temperature: result.main.temp,
+              description: result.weather[0]?.description || "情報なし",
+              humidity: result.main.humidity,
+              windSpeed: result.wind.speed,
+              updatedAt: new Date(result.dt * 1000).toISOString()
             }, null, 2)
           }
         ]
@@ -205,11 +240,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
     }
     case "get_forecast": {
       const input = request.params.arguments as GetForecastInput;
-      const forecastData = await getForecast(input.city, input.days);
-      if ("error" in forecastData) {
-        throw new Error(`エラー: ${forecastData.error}`);
+      const result = await getForecast(input.city, input.days);
+      if ("error" in result) {
+        throw new Error(`エラー: ${result.error}`);
       }
-      const formattedForecasts = forecastData.list.map((item: WeatherListItem) => ({
+      const formattedForecasts = result.list.map((item: WeatherListItem) => ({
         dateTime: item.dt_txt,
         temperature: item.main.temp,
         description: item.weather[0]?.description || "情報なし",
@@ -217,11 +252,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
           item.pop !== undefined ? `${(item.pop * 100).toFixed(0)}%` : "N/A",
       }));
       return {
+        _meta: {},
         content: [
           {
             type: "text",
             text: JSON.stringify({
-              city: forecastData.city.name,
+              city: result.city.name,
               forecasts: formattedForecasts
             }, null, 2)
           }
@@ -233,86 +269,60 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
   }
 });
 
-// リソース一覧を返すハンドラーを登録
-server.setRequestHandler(ListResourcesRequestSchema, async () => {
-  return {
-    resources: [
-      {
-        name: "weather",
-        description: "都市の気象情報を提供するリソース",
-        uriTemplate: weatherResourceTemplate.uriTemplate,
-        uri: "weather://tokyo/current" // サンプルURIを提供
-      },
-    ],
-  };
-});
-
-// リソーステンプレート一覧を返すハンドラーを登録
-server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
-  return {
-    resourceTemplates: [
-      {
-        name: "weather",
-        description: "都市の気象情報を提供するリソース",
-        uriTemplate: "weather://{city}/{type}",
-        parameters: {
-          city: {
-            type: "string",
-            description: "天気を取得したい都市名"
-          },
-          type: {
-            type: "string",
-            description: "取得する情報の種類（current または forecast）",
-            enum: ["current", "forecast"]
-          }
-        },
-        required: ["city", "type"]
-      }
-    ]
-  };
-});
-
 // リソース読み取りのハンドラーを登録
 server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResourceRequest) => {
-  const uri = new URL(request.params.uri);
-  const [city, type] = uri.pathname.split('/').slice(1);
-
-  if (!city || !type) {
-    throw new Error("Invalid URI format: city and type are required");
-  }
-
-  if (!["current", "forecast"].includes(type)) {
-    throw new Error(`Invalid resource type: ${type}. Must be either 'current' or 'forecast'`);
-  }
-
-  if (type === "current") {
-    const weatherData = await getCurrentWeather(city);
-    if ("error" in weatherData) {
-      throw new Error(`エラー: ${weatherData.error}`);
+  try {
+    // URIのバリデーション
+    if (!request.params.uri.startsWith('weather://')) {
+      throw new Error('Invalid URI scheme: must start with weather://');
     }
-    return {
-      contents: [
-        {
-          uri: request.params.uri,
-          text: JSON.stringify({
-            city: weatherData.name,
-            temperature: weatherData.main.temp,
-            description: weatherData.weather[0]?.description || "情報なし",
-            humidity: weatherData.main.humidity,
-            windSpeed: weatherData.wind.speed,
-            updatedAt: new Date(weatherData.dt * 1000).toISOString()
-          }, null, 2)
-        },
-      ],
-    };
-  }
 
-  if (type === "forecast") {
-    const forecastData = await getForecast(city);
-    if ("error" in forecastData) {
-      throw new Error(`エラー: ${forecastData.error}`);
+    // URIから都市名とタイプを抽出
+    const uri = request.params.uri.replace('weather://', '');
+    const segments = uri.split('/');
+    
+    if (segments.length !== 2) {
+      throw new Error('Invalid URI format: must contain exactly two segments (city and type)');
     }
-    const formattedForecasts = forecastData.list.map((item: WeatherListItem) => ({
+    
+    const [city, type] = segments;
+
+    if (!city || !type) {
+      throw new Error("Invalid URI format: city and type are required");
+    }
+
+    if (!["current", "forecast"].includes(type)) {
+      throw new Error(`Invalid resource type: ${type}. Must be either 'current' or 'forecast'`);
+    }
+
+    if (type === "current") {
+      const result = await getCurrentWeather(city);
+      if ("error" in result) {
+        throw new Error(`エラー: ${result.error}`);
+      }
+      return {
+        _meta: {},
+        contents: [
+          {
+            uri: request.params.uri,
+            text: JSON.stringify({
+              city: result.name,
+              temperature: result.main.temp,
+              description: result.weather[0]?.description || "情報なし",
+              humidity: result.main.humidity,
+              windSpeed: result.wind.speed,
+              updatedAt: new Date(result.dt * 1000).toISOString()
+            }, null, 2)
+          },
+        ],
+      };
+    }
+
+    const result = await getForecast(city);
+    if ("error" in result) {
+      throw new Error(`エラー: ${result.error}`);
+    }
+    const formattedForecasts = result.list.map((item: WeatherListItem) => ({
       dateTime: item.dt_txt,
       temperature: item.main.temp,
       description: item.weather[0]?.description || "情報なし",
@@ -320,32 +330,33 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request: ReadResource
         item.pop !== undefined ? `${(item.pop * 100).toFixed(0)}%` : "N/A",
     }));
     return {
+      _meta: {},
       contents: [
         {
           uri: request.params.uri,
           text: JSON.stringify({
-            city: forecastData.city.name,
+            city: result.city.name,
             forecasts: formattedForecasts
           }, null, 2)
         },
       ],
     };
+  } catch (error) {
+    console.error("Error in ReadResourceRequestSchema handler:", error);
+    throw error;
   }
-
-  throw new Error("Invalid resource type");
 });
 
 // サーバー起動処理
-async function main() {
-  const transport = new StdioServerTransport();
+const main = async () => {
   try {
+    const transport = new StdioServerTransport();
     await server.connect(transport);
     // プロトコルメッセージと混ざらないように、サーバー起動メッセージは出力しない
-  } catch (error) {
+  } catch (error: any) {
     console.error("MCP Server failed to connect:", error);
     process.exit(1);
   }
-}
+};
 
 main();
-// --- サーバー起動処理ここまで ---
