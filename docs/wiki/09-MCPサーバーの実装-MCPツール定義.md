@@ -68,10 +68,12 @@ MCPサーバーでは、2つの重要なハンドラーを実装する必要が�
 
 これらのハンドラーを使って、ツールの定義と実行ロジックを実装していきます。
 
-### ツール一覧を返すハンドラーの実装
+### ツール一覧を返すハンドラー（ListToolsRequestSchema）の実装
+
+MCPサーバーで最も重要なハンドラーの1つが、`ListToolsRequestSchema`です。このハンドラーは、クライアントがサーバーで利用可能なツールを探索するために使用します。
 
 ```typescript
-// 利用可能なツールの一覧を返すハンドラー
+// クライアントが利用可能なツールの一覧を取得するためのハンドラー
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
@@ -167,7 +169,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 - `CallToolRequestSchema` ハンドラーでは、実際のツール実行ロジックを実装します。
 - レスポンスは必ず `content` 配列の形式で返す必要があります。
 - エラーは例外をスローすることで表現します。
-こちらも `get_current_weather` と同様の構造です。入力スキーマ (`GetForecastInputSchema`) とAPIクライアント関数 (`getForecast`) が異なります。
+- こちらも `get_current_weather` と同様の構造です。入力スキーマ (`GetForecastInputSchema`) とAPIクライアント関数 (`getForecast`) が異なります。
+
+### `ListToolsRequestSchema`の仕組みと使い方
+
+1. **ハンドラーの役割**:
+   - サーバーで利用可能なすべてのツールの一覧を提供します
+   - 各ツールの名前、説明、入力パラメータの情報を返します
+   - クライアントはこの情報を使ってツールを適切に呼び出せます
+
+2. **レスポンスの構造**:
+   ```typescript
+   {
+     tools: [
+       {
+         name: string;         // ツールの識別子
+         description: string;  // ツールの説明
+         inputSchema: z.ZodType; // 入力パラメータの型定義
+       },
+       // ... 他のツール ...
+     ]
+   }
+   ```
+
+3. **クライアント側での使用方法**:
+   ```typescript
+   // クライアントコードの例
+   const tools = await client.listTools();
+   // 利用可能なツールの一覧を取得
+   console.log(tools);
+   
+   // 特定のツールを使用
+   const result = await client.callTool({
+     name: "get_current_weather",
+     arguments: { city: "Tokyo" }
+   });
+   ```
+
+4. **セキュリティと制御**:
+   - ツール一覧は動的に変更可能です
+   - 権限に応じて表示するツールを制御できます
+   - クライアントの状態に応じてツールの利用可否を管理できます
 
 ## 3. MCPサーバーインスタンスの作成
 
