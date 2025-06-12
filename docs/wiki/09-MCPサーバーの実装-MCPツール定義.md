@@ -73,7 +73,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
 // リソーステンプレート一覧を返すハンドラー
 server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
   return {
-    templates: [
+    resourceTemplates: [
       {
         name: "weather",
         description: "都市の気象情報を提供するリソース",

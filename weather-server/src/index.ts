@@ -5,6 +5,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
   ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
   ReadResourceRequestSchema,
   CallToolRequest,
   ReadResourceRequest,
@@ -240,8 +241,34 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
         name: "weather",
         description: "都市の気象情報を提供するリソース",
         template: weatherResourceTemplate,
+        uri: "weather://tokyo/current" // サンプルURIを提供
       },
     ],
+  };
+});
+
+// リソーステンプレート一覧を返すハンドラーを登録
+server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+  return {
+    resourceTemplates: [
+      {
+        name: "weather",
+        description: "都市の気象情報を提供するリソース",
+        template: "weather://{city}/{type}",
+        parameters: {
+          city: {
+            type: "string",
+            description: "天気を取得したい都市名"
+          },
+          type: {
+            type: "string",
+            description: "取得する情報の種類（current または forecast）",
+            enum: ["current", "forecast"]
+          }
+        },
+        required: ["city", "type"]
+      }
+    ]
   };
 });
 
